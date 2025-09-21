@@ -2,16 +2,21 @@ import dotenv from "dotenv";
 import Fastify from "fastify";
 import fastifyStatic from "@fastify/static";
 import fastifyCookie from "@fastify/cookie";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { createServer, ServerResponse } from "node:http";
+import { fileURLToPath } from "node:url";
 import { logging, server as wisp } from "@mercuryworkshop/wisp-js/server";
 import { createBareServer } from "@tomphttp/bare-server-node";
-import { MasqrMiddleware } from "./masqr.js";
 
 dotenv.config();
 ServerResponse.prototype.setMaxListeners(50);
 
-const port = process.env.PORT || 2345, server = createServer(), bare = process.env.BARE !== "false" ? createBareServer("/seal/") : null;
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+const port = process.env.PORT || 2345;
+const server = createServer();
+const bare = process.env.BARE !== "false" ? createBareServer("/seal/") : null;
+let MasqrMiddleware;
 logging.set_level(logging.NONE);
 
 Object.assign(wisp.options, {
@@ -28,27 +33,34 @@ server.on("upgrade", (req, sock, head) =>
 
 const app = Fastify({
   serverFactory: h => (server.on("request", (req,res) =>
-    bare?.shouldRoute(req) ? bare.routeRequest(req,res) : h(req,res)), server),
+    bare?.shouldRoute(req,res) ? bare.routeRequest(req,res) : h(req,res)), server),
   logger: false
 });
 
 await app.register(fastifyCookie);
 
 app.register(fastifyStatic, {
-  root: join(import.meta.dirname, "dist"),
+  root: join(__dirname, "dist"),
   prefix: "/",
   decorateReply: true
 });
 
-if (process.env.MASQR === "true")
+if (process.env.MASQR === "true") {
+  const mod = await import("./masqr.js");
+  MasqrMiddleware = mod.MasqrMiddleware;
   app.addHook("onRequest", MasqrMiddleware);
+}
 
 const proxy = (url, type="application/javascript") => async (req, reply) => {
   try {
-    const res = await fetch(url(req)); if (!res.ok) return reply.code(res.status).send();
-    if (res.headers.get("content-type")) reply.type(res.headers.get("content-type")); else reply.type(type);
+    const res = await fetch(url(req)); 
+    if (!res.ok) return reply.code(res.status).send();
+    if (res.headers.get("content-type")) reply.type(res.headers.get("content-type")); 
+    else reply.type(type);
     return reply.send(Buffer.from(await res.arrayBuffer()));
-  } catch { return reply.code(500).send(); }
+  } catch {
+    return reply.code(500).send();
+  }
 };
 
 app.get("/assets/img/*", proxy(req => `https://dogeub-assets.pages.dev/img/${req.params["*"]}`, ""));
@@ -67,4 +79,16 @@ app.setNotFoundHandler((req, reply) =>
     : reply.code(404).send({ error: "Not Found" })
 );
 
-app.listen({ port }).then(()=>console.log(`Server running on ${port}`));
+// --- dual mode ---
+if (process.env.VERCEL) {
+  // export handler for Vercel
+  export default async function handler(req, res) {
+    await app.ready();
+    app.server.emit("request", req, res);
+  }
+} else {
+  // local NodeJS
+  app.listen({ port }).then(() => console.log(`Server running on ${port}`));
+}
+
+export { app };
