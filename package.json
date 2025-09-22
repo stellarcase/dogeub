@@ -18,6 +18,7 @@
     "@headlessui/react": "^2.2.7",
     "@mercuryworkshop/bare-as-module3": "^2.2.5",
     "@mercuryworkshop/bare-mux": "^2.1.6",
+    "express": "^4.18.2",
     "@mercuryworkshop/libcurl-transport": "^1.5.0",
     "@mercuryworkshop/wisp-js": "^0.3.3",
     "@mui/material": "^7.3.1",
